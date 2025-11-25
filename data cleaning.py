@@ -45,9 +45,9 @@ try:
 
     # Save the filtered DataFrame to a new TSV file
     # We use index=False to avoid writing the DataFrame index as a new column in the file. [2, 5, 6, 9]
-    df_merged_with_cpc_group.to_csv(r"Data/g_claims_2015.csv", index=False)
+    df_merged_with_cpc_group.to_csv(r"Data/g_claims_2016.csv", index=False)
 
-    print(f"\nSuccessfully filtered the data and saved it to: {'Data/g_claims_2015.csv'}")
+    print(f"\nSuccessfully filtered the data and saved it to: {'Data/g_claims_2016.csv'}")
 
 except KeyError:
     print("Error: A column named 'patent_id' was not found in the file.")
