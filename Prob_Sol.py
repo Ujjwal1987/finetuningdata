@@ -6,7 +6,7 @@ import pandas as pd
 import json
 
 # Fixed model initialization
-model_prob_sol = OllamaLLM(model="gpt-oss:latest", temperature=0, keep_alive="1s", options={"nothink": True})
+model_prob_sol = OllamaLLM(model="gpt-oss:latest", temperature=0, keep_alive="1s", reasoning=False)
 
 template_background = """You are a patent analyst. Based on background of the invention, draft a paragraph on problem that is being addressed by the patent. Additionally, identify lines from the background that correspond to exact verbatim of the problem drafted in the patent.
 Output the background paragraph and the verbatim text from the patent in a json format having fields as "problem" and "problem_verbatim". The field "problem" should include the paragraph describing the problem, while the field "problem_verbatim" should include the exact verbatim identified from the background drafted in the patent.
@@ -14,7 +14,7 @@ Here is the background from patent: {BACKGROUND}
 """
 
 template_solution = """You are a patent analyst. Based on claims of the invention and the background, draft a paragraph on solution claimed in the patent. Additionally, identify lines from the claims that correspond to exact verbatim of the solution claimed in the patent.
-Output the solution paragraph and the verbatim text from the patent in a json format having fields as "solution" and "solution_verbatim". The field "solution" should include the paragraph describing the solution, while the field "solution_verbatim" should include the exact verbatim identified from the claims drafted in the patent.
+Output the solution paragraph and the verbatim text from the patent in a json format having fields as "solution" and "solution_verbatim". The field "solution" should include the paragraph describing the solution, while the field "solution_verbatim" should include the exact verbatim identified from the claims drafted in the patent. The "solution verbatim" should not be the complete claim but part of the claim that corresponds to the solution paragraph.
 Here is the background of patent: {BACKGROUND}
 Here is the claims of the patent: {CLAIMS}
 """

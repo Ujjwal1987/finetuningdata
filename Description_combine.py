@@ -1,95 +1,109 @@
 import pandas as pd
 import os
+from pathlib import Path
 
-merged_desc = os.path.join("Data", "g_brf_sum_text_2016.tsv")
-df_desc = pd.read_csv(merged_desc, sep='\t', low_memory=False)
 
-df_patent_loc = os.path.join("Data", "g_patents_merged_text_2016.csv")
-df_patent = pd.read_csv(df_patent_loc)
+def memory_efficient_merge():
+    # Define file paths
+    merged_desc_path = os.path.join("Data", "g_brf_sum_text_2019.tsv")
+    df_patent_loc = os.path.join("Data", "g_patents_merged_text.csv")
+    output_path = os.path.join("Data", "g_patents_scanner_printer_merged_text.csv")
 
-# Debug: Check the column names and data types
-print("Patent file columns:", df_patent.columns.tolist())
-print("Description file columns:", df_desc.columns.tolist())
+    # Read patent data with memory optimization
+    print("Reading patent data...")
+    # Add low_memory=False to handle mixed types properly
+    df_patent = pd.read_csv(df_patent_loc, dtype={'patent_id': 'string'}, low_memory=False)
 
-# Check if patent_id columns have the same name and data type
-print("Patent ID column dtype:", df_patent['patent_id'].dtype if 'patent_id' in df_patent.columns else "Not found")
-print("Summary text column dtype:", df_desc['summary_text'].dtype if 'summary_text' in df_desc.columns else "Not found")
+    # Read description file with memory optimization
+    print("Reading description data...")
+    df_desc = pd.read_csv(merged_desc_path, sep='\t', dtype={'patent_id': 'string'})
 
-# Ensure patent_id columns are consistent (convert to string)
-if 'patent_id' in df_patent.columns:
-    df_patent['patent_id'] = df_patent['patent_id'].astype(str)
-if 'patent_id' in df_desc.columns:
-    df_desc['patent_id'] = df_desc['patent_id'].astype(str)
+    # Filter description data to only keep rows with non-empty summary_text
+    print("Filtering description data...")
+    df_desc_filtered = df_desc[
+        (df_desc['summary_text'].notna()) &
+        (df_desc['summary_text'] != '') &
+        (df_desc['summary_text'].str.strip() != '')
+        ][['patent_id', 'summary_text']]
 
-# Check for any NaN values in patent_id
-print("NaN in patent_id (patent):", df_patent['patent_id'].isna().sum() if 'patent_id' in df_patent.columns else 0)
-print("NaN in patent_id (desc):", df_desc['patent_id'].isna().sum() if 'patent_id' in df_desc.columns else 0)
+    # Remove duplicates from filtered description data
+    print("Removing duplicates from description...")
+    df_desc_subset = df_desc_filtered.drop_duplicates(subset=['patent_id'], keep='first')
 
-# Create subset with only the columns we need
-df_desc_subset = df_desc[['patent_id', 'summary_text']].drop_duplicates()
+    # Check if we have any data to merge
+    if len(df_patent) == 0 or len(df_desc_subset) == 0:
+        print("No data to merge")
+        return None
 
-# Merge on patent_id
-merged_df = pd.merge(df_patent, df_desc_subset, on='patent_id', how='left')
+    # Method 1: Use smaller chunks for merging (memory efficient approach)
+    print("Performing chunked merge operation...")
 
-# Check if summary_text is populated
-print("Summary text null count:",
-      merged_df['summary_text'].isna().sum() if 'summary_text' in merged_df.columns else "Column not found")
-print("Sample of merged data:")
-print(merged_df[['patent_id', 'summary_text']].head(10))
+    # Create a set of patent_ids from the filtered description data for faster lookup
+    desc_patent_ids = set(df_desc_subset['patent_id'].values)
 
-# Check if there are any empty/NaN summary_text values
-if 'summary_text' in merged_df.columns:
-    empty_summary_count = merged_df['summary_text'].isna().sum() + (merged_df['summary_text'] == '').sum()
-    print(f"Empty/NaN summary_text count: {empty_summary_count}")
+    # Filter patent data to only include those present in description data
+    print("Filtering patent data to matching patent_ids...")
+    df_patent_filtered = df_patent[df_patent['patent_id'].isin(desc_patent_ids)]
 
-    # Check if all summary_text entries are empty
-    if len(merged_df) > 0 and empty_summary_count == len(merged_df):
-        print("WARNING: All summary_text entries are empty/NaN. Not appending to file.")
-        exit()
-    elif empty_summary_count > 0:
-        print(f"Warning: {empty_summary_count} rows have empty/NaN summary_text")
+    # Perform merge with smaller datasets
+    print("Merging filtered datasets...")
+    merged_df = pd.merge(df_patent_filtered, df_desc_subset, on='patent_id', how='left')
 
-# Check if output file already exists
-output_path = os.path.join("Data", "g_patents_scanner_printer_merged_text.csv")
+    # Handle existing file properly
+    output_exists = os.path.exists(output_path)
 
-if os.path.exists(output_path):
-    # File exists, read it and append new rows
-    existing_df = pd.read_csv(output_path)
+    if output_exists:
+        print("Processing existing file...")
+        try:
+            # Read existing file with memory constraints
+            existing_df = pd.read_csv(output_path, dtype={'patent_id': 'string'})
 
-    # Remove duplicates from existing data based on patent_id to avoid duplicate keys
-    existing_df_dedup = existing_df.drop_duplicates(subset=['patent_id'], keep='first')
+            # Remove duplicates from existing data based on patent_id
+            existing_dedup = existing_df.drop_duplicates(subset=['patent_id'], keep='first')
 
-    # Find rows that are not already in the existing file
-    # Create a key column for comparison (assuming patent_id is the unique identifier)
-    merged_df['key'] = merged_df['patent_id']
-    existing_df['key'] = existing_df['patent_id']
+            # Find new rows that are not in existing file
+            if len(merged_df) > 0:
+                # Create key sets for comparison
+                merged_keys = set(merged_df['patent_id'].values)
+                existing_keys = set(existing_dedup['patent_id'].values)
 
-    # Find new rows (rows in merged_df that are not in existing_df)
-    new_rows = merged_df[~merged_df['key'].isin(existing_df['key'])]
+                # Find new rows only
+                new_rows = merged_df[~merged_df['patent_id'].isin(existing_keys)]
 
-    # Check if new rows have non-empty summary_text
-    if len(new_rows) > 0:
-        # Filter out rows with empty/NaN summary_text
-        valid_new_rows = new_rows[
-            (new_rows['summary_text'].notna()) &
-            (new_rows['summary_text'] != '') &
-            (new_rows['summary_text'].str.strip() != '')
-            ]
+                if len(new_rows) > 0:
+                    print(f"Appending {len(new_rows)} new rows")
+                    final_df = pd.concat([existing_dedup, new_rows], ignore_index=True)
+                else:
+                    final_df = existing_dedup
+                    print("No new rows to append")
+            else:
+                final_df = existing_dedup
 
-        if len(valid_new_rows) > 0:
-            print(f"Appending {len(valid_new_rows)} new rows with valid summary_text")
-            # Combine existing data with new rows
-            final_df = pd.concat([existing_df, valid_new_rows], ignore_index=True)
-            final_df.to_csv(output_path, index=False)
-            print("File updated successfully")
-        else:
-            print("No new rows with valid summary_text to append")
+        except Exception as e:
+            print(f"Error processing existing file: {e}")
+            final_df = merged_df
     else:
-        print("No new rows to append - file already contains all data")
-        final_df = existing_df  # Keep existing data
-else:
-    # File doesn't exist, create it
-    print("Creating new file")
-    merged_df.to_csv(output_path, index=False)
+        # Create new file with merged data
+        print("Creating new file")
+        final_df = merged_df
 
-print(f"Merged successfully. Shape: {merged_df.shape}")
+    # Save the result
+    if len(final_df) > 0:
+        final_df.to_csv(output_path, index=False)
+        print(f"File saved successfully. Shape: {final_df.shape}")
+    else:
+        print("No data to save")
+
+    return final_df
+
+
+# Execute the memory-efficient merge
+if __name__ == "__main__":
+    try:
+        result = memory_efficient_merge()
+        if result is not None:
+            print(f"Processing completed. Final shape: {result.shape}")
+        else:
+            print("Processing completed with no data")
+    except Exception as e:
+        print(f"Error during processing: {e}")
